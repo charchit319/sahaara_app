@@ -2,28 +2,92 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
+import '../widgets/card_actions.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/page_header.dart';
+import 'add_record_sheet.dart';
+import '../widgets/empty_state.dart';
+import '../data/care_store.dart';
 
 class MedicalHistoryScreen extends StatelessWidget {
-  const MedicalHistoryScreen({super.key});
+  final String? personId;
+  final bool showHeader;
+  final bool canEdit;
+  final VoidCallback? onChanged; // called after an edit or delete so the parent refreshes
+  const MedicalHistoryScreen({
+    super.key,
+    this.personId,
+    this.showHeader = true,
+    this.canEdit = false,
+    this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final records = mockRecords
+        .where((r) => personId == null || r.personId == personId)
+        .toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const PageHeader(
-          title: 'Medical History',
-          subtitle: 'Every health record, in one safe place',
-        ),
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(24, 4, 24, 120),
-            itemCount: mockRecords.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 18),
-            itemBuilder: (_, i) => _RecordCard(r: mockRecords[i]),
+        if (showHeader)
+          const PageHeader(
+            title: 'Medical History',
+            subtitle: 'Every health record, in one safe place',
           ),
+        Expanded(
+          child: (recordsStore.loading && mockRecords.isEmpty)
+              ? const Center(child: CircularProgressIndicator(color: AppColors.maroon))
+              : (recordsStore.error != null && mockRecords.isEmpty)
+                  ? EmptyState(
+                      icon: Icons.cloud_off_rounded,
+                      title: 'Something went wrong',
+                      message: recordsStore.error!,
+                      actionLabel: 'TRY AGAIN',
+                      actionIcon: Icons.refresh_rounded,
+                      onAction: recordsStore.load,
+                    )
+                  : records.isEmpty                            ? EmptyState(
+                  icon: Icons.history_edu_rounded,
+                  title: 'No medical history yet',
+                  message: canEdit
+                      ? 'Tap "ADD MEDICAL RECORD" above to log a diagnosis, treatment or prescription.'
+                      : 'Your caregiver has not added any records yet.',
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(24, 4, 24, 120),
+                  itemCount: records.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 18),
+                  itemBuilder: (_, i) {
+                    final r = records[i];
+                    return _RecordCard(
+                      r: r,
+                      onEdit: canEdit
+                          ? () => showAddRecordSheet(
+                              context, r.personId, () => onChanged?.call(),
+                              existing: r)
+                          : null,
+                                            onDelete: canEdit
+                          ? () async {
+                              if (!await confirmDelete(context, 'this record')) return;
+                              try {
+                                await recordsStore.delete(r.id);
+                                onChanged?.call();
+                              } catch (e) {
+                                debugPrint('Deleting record failed: $e');
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                      content: Text('Could not delete. Please try again.',
+                                          style: AppTheme.body(14, color: AppColors.sand))));
+                                }
+                              }
+                            }
+                          : null,
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -32,7 +96,9 @@ class MedicalHistoryScreen extends StatelessWidget {
 
 class _RecordCard extends StatelessWidget {
   final MedicalRecord r;
-  const _RecordCard({required this.r});
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  const _RecordCard({required this.r, this.onEdit, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -90,6 +156,10 @@ class _RecordCard extends StatelessWidget {
               child: Text(r.prescription!,
                   style: AppTheme.body(14).copyWith(fontStyle: FontStyle.italic)),
             ),
+          ],
+          if (onEdit != null && onDelete != null) ...[
+            const Divider(height: 28, color: Colors.white54),
+            CardActions(onEdit: onEdit!, onDelete: onDelete!),
           ],
         ],
       ),

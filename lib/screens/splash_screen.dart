@@ -4,6 +4,8 @@ import '../widgets/app_background.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/ribbon.dart';
 import 'onboarding_screen.dart';
+import '../config.dart';
+import 'role_screen.dart';
 
 /// Initial load screen: logo animates in, the Dhaka ribbon "loads" across the
 /// bottom, then we move on to onboarding.
@@ -37,7 +39,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     if (!mounted) return;
     Navigator.of(context).pushReplacement(PageRouteBuilder(
       transitionDuration: const Duration(milliseconds: 700),
-      pageBuilder: (_, __, ___) => const OnboardingScreen(),
+      pageBuilder: (_, __, ___) => supabase.auth.currentSession != null
+    ? const RoleScreen()
+    : const OnboardingScreen(),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
     ));
   }

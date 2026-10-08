@@ -7,6 +7,7 @@ class AppTextField extends StatefulWidget {
   final bool isPassword;
   final int maxLines;
   final TextInputType? keyboardType;
+  final TextEditingController? controller;
 
   const AppTextField({
     super.key,
@@ -15,6 +16,7 @@ class AppTextField extends StatefulWidget {
     this.isPassword = false,
     this.maxLines = 1,
     this.keyboardType,
+    this.controller,
   });
 
   @override
@@ -32,6 +34,7 @@ class _AppTextFieldState extends State<AppTextField> {
   @override
   Widget build(BuildContext context) {
     return TextField(
+      controller: widget.controller,
       obscureText: widget.isPassword && _hidden,
       maxLines: widget.isPassword ? 1 : widget.maxLines,
       keyboardType: widget.keyboardType,

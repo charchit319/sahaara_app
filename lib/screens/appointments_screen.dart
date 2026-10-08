@@ -1,13 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:sahaara_app/widgets/card_actions.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/page_header.dart';
 import '../widgets/status_chip.dart';
+import 'add_visit_sheet.dart';
+import '../widgets/empty_state.dart';
+import '../data/care_store.dart';
+
 
 class AppointmentsScreen extends StatefulWidget {
-  const AppointmentsScreen({super.key});
+  /// null = visits of everyone (caregiver tab); otherwise one person's visits.
+  final String? personId;
+  final bool showHeader;
+  final bool canEdit; // show Edit / Delete on each card
+  const AppointmentsScreen({
+    super.key,
+    this.personId,
+    this.showHeader = true,
+    this.canEdit = false,
+  });
 
   @override
   State<AppointmentsScreen> createState() => _AppointmentsScreenState();
@@ -16,17 +30,56 @@ class AppointmentsScreen extends StatefulWidget {
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
   bool _showUpcoming = true;
 
+    @override
+  void initState() {
+    super.initState();
+    visitsStore.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    visitsStore.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+  
+
+    Future<void> _delete(Appointment a) async {
+    if (!await confirmDelete(context, 'this visit')) return;
+    try {
+      await visitsStore.delete(a.id);
+    } catch (e) {
+      debugPrint('Deleting visit failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not delete. Please try again.',
+                style: AppTheme.body(14, color: AppColors.sand))));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final list = mockAppointments.where((a) => a.isUpcoming == _showUpcoming).toList();
+    final list = mockAppointments
+        .where((a) =>
+            a.isUpcoming == _showUpcoming &&
+            (widget.personId == null || a.personId == widget.personId))
+        .toList()
+      ..sort((a, b) => _showUpcoming
+          ? a.dateTime.compareTo(b.dateTime)
+          : b.dateTime.compareTo(a.dateTime));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const PageHeader(
-          title: 'My Appointments',
-          subtitle: 'Manage your healthcare visits and schedules',
-        ),
+        if (widget.showHeader)
+          const PageHeader(
+            title: 'Hospital Visits',
+            subtitle: 'Upcoming and past visits for everyone you look after',
+          ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: _Toggle(
@@ -36,13 +89,44 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ),
         const SizedBox(height: 16),
         Expanded(
-          child: list.isEmpty
-              ? const _Empty()
+                    child: (visitsStore.loading && mockAppointments.isEmpty)
+              ? const Center(child: CircularProgressIndicator(color: AppColors.maroon))
+              : (visitsStore.error != null && mockAppointments.isEmpty)
+                  ? EmptyState(
+                      icon: Icons.cloud_off_rounded,
+                      title: 'Something went wrong',
+                      message: visitsStore.error!,
+                      actionLabel: 'TRY AGAIN',
+                      actionIcon: Icons.refresh_rounded,
+                      onAction: visitsStore.load,
+                    )
+                  : list.isEmpty
+              ? EmptyState(
+                  icon: Icons.event_busy_rounded,
+                  title: _showUpcoming ? 'No upcoming visits' : 'No past visits',
+                  message: widget.personId == null
+                      ? 'Visits you add for the people in your care will show up here.'
+                      : (widget.canEdit
+                          ? 'Tap "ADD HOSPITAL VISIT" above to schedule or log a visit.'
+                          : 'Visits added by your caregiver will appear here.'),
+                )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(24, 4, 24, 120),
                   itemCount: list.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 18),
-                  itemBuilder: (_, i) => _AppointmentCard(a: list[i]),
+                  itemBuilder: (_, i) {
+                    final a = list[i];
+                    return _AppointmentCard(
+                      a: a,
+                      showPerson: widget.personId == null,
+                      onEdit: widget.canEdit
+                          ? () => showAddVisitSheet(
+                              context, a.personId, () => setState(() {}),
+                              existing: a)
+                          : null,
+                      onDelete: widget.canEdit ? () => _delete(a) : null,
+                    );
+                  },
                 ),
         ),
       ],
@@ -94,7 +178,15 @@ class _Toggle extends StatelessWidget {
 
 class _AppointmentCard extends StatelessWidget {
   final Appointment a;
-  const _AppointmentCard({required this.a});
+  final bool showPerson;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  const _AppointmentCard({
+    required this.a,
+    this.showPerson = false,
+    this.onEdit,
+    this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -137,6 +229,13 @@ class _AppointmentCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 18),
+            if (showPerson) ...[
+              _LabelValue(
+                  icon: Icons.favorite_border_rounded,
+                  label: 'PATIENT',
+                  value: personName(a.personId)),
+              const SizedBox(height: 12),
+            ],
             _LabelValue(icon: Icons.person_outline_rounded, label: 'DOCTOR', value: a.doctor),
             const SizedBox(height: 12),
             _LabelValue(
@@ -166,6 +265,10 @@ class _AppointmentCard extends StatelessWidget {
                   ],
                 ),
               ),
+            ],
+            if (onEdit != null && onDelete != null) ...[
+              const Divider(height: 24, color: Colors.white54),
+              CardActions(onEdit: onEdit!, onDelete: onDelete!),
             ],
           ],
         ),
@@ -202,26 +305,6 @@ class _LabelValue extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _Empty extends StatelessWidget {
-  const _Empty();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.event_busy_rounded, size: 52, color: AppColors.maroon.withOpacity(0.4)),
-          const SizedBox(height: 10),
-          Text('No appointments found', style: AppTheme.body(16, weight: FontWeight.w600)),
-          Text('Your scheduled visits will appear here.',
-              style: AppTheme.body(13, color: AppColors.muted)),
-        ],
-      ),
     );
   }
 }

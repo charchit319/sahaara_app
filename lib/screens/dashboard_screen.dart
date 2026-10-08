@@ -4,9 +4,15 @@ import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/ribbon.dart';
+import 'people_screen.dart';
+import 'person_record_screen.dart';
+import '../config.dart';
+import '../widgets/empty_state.dart';
+import '../data/people_store.dart';
+import '../data/care_store.dart';
 
-/// Home tab. [onNavigate] switches the bottom-bar tab
-/// (0 Home, 1 Visits, 2 Records, 3 Contact).
+/// Caregiver home. Everything below the patient list follows the selected person.
+/// [onNavigate] switches the bottom-bar tab (0 Home, 1 People, 2 Visits, 3 Contact).
 class DashboardScreen extends StatefulWidget {
   final ValueChanged<int> onNavigate;
   const DashboardScreen({super.key, required this.onNavigate});
@@ -16,8 +22,27 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  int _patient = 0;
-  final Set<int> _taken = {0};
+  int _selected = 0;
+final Set<String> _taken = {}; // "personId-index"
+  @override
+  void initState() {
+    super.initState();
+    peopleStore.addListener(_refresh);
+    visitsStore.addListener(_refresh);
+    recordsStore.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    peopleStore.removeListener(_refresh);
+    visitsStore.removeListener(_refresh);
+    recordsStore.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
 
   String get _greeting {
     final h = DateTime.now().hour;
@@ -30,12 +55,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
         SnackBar(content: Text('$what — coming soon', style: AppTheme.body(14, color: AppColors.sand))),
       );
 
+  Future<void> _open(Person p, RecordSection section) async {
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => PersonRecordScreen(person: p, initial: section)));
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
-    final upcoming = mockAppointments.where((a) => a.isUpcoming).toList()
+        if (peopleStore.loading && mockPeople.isEmpty) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.maroon));
+    }
+    if (peopleStore.error != null && mockPeople.isEmpty) {
+      return EmptyState(
+        icon: Icons.cloud_off_rounded,
+        title: 'Something went wrong',
+        message: peopleStore.error!,
+        actionLabel: 'TRY AGAIN',
+        actionIcon: Icons.refresh_rounded,
+        onAction: peopleStore.load,
+      );
+    }
+        if (mockPeople.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
+        children: [
+          _header(),
+          const SizedBox(height: 40),
+          EmptyState(
+            icon: Icons.groups_rounded,
+            title: 'Add the first person you look after',
+            message:
+                'Each person gets their own record for visits, medical history and documents.',
+            actionLabel: 'ADD PERSON',
+            onAction: () => showAddPersonSheet(context, () => setState(() {})),
+          ),
+        ],
+      );
+    }
+    if (_selected >= mockPeople.length) _selected = 0;
+    final person = mockPeople[_selected];
+
+    final upcoming = mockAppointments
+        .where((a) => a.personId == person.id && a.isUpcoming)
+        .toList()
       ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
     final next = upcoming.isEmpty ? null : upcoming.first;
-    final patient = mockPatients[_patient];
+    final meds = mockMedications.where((m) => m.personId == person.id).toList();
+    final records = mockRecords.where((r) => r.personId == person.id).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
@@ -43,35 +111,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _header(),
         const SizedBox(height: 26),
 
-        _sectionTitle('My Patients', 'See all', () => _soon('Patients list')),
+        _sectionTitle('People in your care', 'See all', () => widget.onNavigate(1)),
         const SizedBox(height: 12),
-        _patients(),
+        _people(),
+        const SizedBox(height: 14),
+        _openRecordButton(person),
         const SizedBox(height: 26),
 
-        if (next != null) ...[
-          _nextAppointment(next),
-          const SizedBox(height: 18),
-        ],
+        _nextAppointment(person, next),
+        const SizedBox(height: 18),
 
-        _stats(upcoming.length),
+        _stats(person, upcoming.length, meds.length),
         const SizedBox(height: 26),
 
-        _sectionTitle("Today's medication · ${patient.name}", null, null),
+        _sectionTitle("Today's medication · ${person.name}", null, null),
         const SizedBox(height: 12),
-        _medications(),
+        _medications(person, meds),
         const SizedBox(height: 26),
 
         _sectionTitle('Quick actions', null, null),
         const SizedBox(height: 12),
-        _quickActions(),
+        _quickActions(person),
         const SizedBox(height: 26),
 
-        _sectionTitle('Recent records', 'View all', () => widget.onNavigate(2)),
+        _sectionTitle('Recent records · ${person.name}', 'View all',
+            () => _open(person, RecordSection.history)),
         const SizedBox(height: 12),
-        ...mockRecords.take(2).map((r) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _recordTile(r),
-            )),
+        if (records.isEmpty)
+          Text('No medical records yet.', style: AppTheme.body(14, color: AppColors.muted))
+        else
+          ...records.take(2).map((r) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _recordTile(person, r),
+              )),
         const SizedBox(height: 14),
         _tip(),
       ],
@@ -90,7 +162,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Text(_greeting.toUpperCase(),
                   style: AppTheme.label().copyWith(color: AppColors.tan)),
               const SizedBox(height: 6),
-              Text('Welcome back,\n$mockUserName', style: AppTheme.heading(32)),
+              Text('Welcome back,\n$userName', style: AppTheme.heading(32)),
               const SizedBox(height: 8),
               Text("Here's how your family's care looks today.",
                   style: AppTheme.body(14, color: AppColors.tan)),
@@ -153,21 +225,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ───────── patients ─────────
-  Widget _patients() {
+  // ───────── people ─────────
+  Widget _people() {
     return SizedBox(
       height: 126,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,
-        itemCount: mockPatients.length + 1,
+        itemCount: mockPeople.length + 1,
         separatorBuilder: (_, __) => const SizedBox(width: 12),
         itemBuilder: (_, i) {
-          if (i == mockPatients.length) return _addPatientCard();
-          final p = mockPatients[i];
-          final sel = i == _patient;
+          if (i == mockPeople.length) return _addPersonCard();
+          final p = mockPeople[i];
+          final sel = i == _selected;
           return GestureDetector(
-            onTap: () => setState(() => _patient = i),
+            onTap: () => setState(() => _selected = i),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 250),
               width: 140,
@@ -187,8 +259,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   CircleAvatar(
                     radius: 20,
                     backgroundColor: sel ? AppColors.sand : AppColors.maroon.withOpacity(0.1),
-                    child: Text(p.name[0],
-                        style: AppTheme.heading(18, color: AppColors.maroon)),
+                    child: Text(p.name[0], style: AppTheme.heading(18, color: AppColors.maroon)),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -197,7 +268,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: AppTheme.body(15,
                               color: sel ? AppColors.sand : AppColors.text,
                               weight: FontWeight.w700)),
-                      Text('${p.relation} · ${p.age}',
+                      Text(p.subtitle,
                           style: AppTheme.body(12,
                               color: sel ? AppColors.sand.withOpacity(0.75) : AppColors.tan)),
                     ],
@@ -211,9 +282,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _addPatientCard() {
+  Widget _addPersonCard() {
     return GestureDetector(
-      onTap: () => _soon('Add patient'),
+      onTap: () => showAddPersonSheet(context, () => setState(() {})),
       child: Container(
         width: 110,
         decoration: BoxDecoration(
@@ -225,7 +296,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             const Icon(Icons.add_circle_outline_rounded, color: AppColors.maroon, size: 30),
             const SizedBox(height: 6),
-            Text('Add patient',
+            Text('Add person',
                 style: AppTheme.body(12.5, color: AppColors.maroon, weight: FontWeight.w600)),
           ],
         ),
@@ -233,8 +304,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _openRecordButton(Person p) {
+    return GestureDetector(
+      onTap: () => _open(p, RecordSection.overview),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: AppColors.maroon.withOpacity(0.4)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.folder_shared_rounded, color: AppColors.maroon, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text("Open ${p.name}'s full record",
+                  style: AppTheme.body(14, color: AppColors.maroon, weight: FontWeight.w700)),
+            ),
+            const Icon(Icons.arrow_forward_rounded, color: AppColors.maroon, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ───────── next appointment ─────────
-  Widget _nextAppointment(Appointment a) {
+  Widget _nextAppointment(Person p, Appointment? a) {
+    if (a == null) {
+      return GlassCard(
+        radius: 36,
+        child: Row(
+          children: [
+            const Icon(Icons.event_available_rounded, color: AppColors.maroon, size: 28),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text('No upcoming hospital visit for ${p.name}.',
+                  style: AppTheme.body(14.5, weight: FontWeight.w600)),
+            ),
+            TextButton(
+              onPressed: () => _open(p, RecordSection.visits),
+              child: Text('Add', style: AppTheme.body(14, color: AppColors.maroon, weight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      );
+    }
+
     final days = a.dateTime.difference(DateTime.now()).inDays;
     final when = days <= 0 ? 'Today' : (days == 1 ? 'Tomorrow' : 'In $days days');
 
@@ -257,9 +373,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Row(
                   children: [
-                    Text('NEXT APPOINTMENT',
-                        style: AppTheme.label().copyWith(color: AppColors.sand.withOpacity(0.7))),
-                    const Spacer(),
+                    Expanded(
+                      child: Text('NEXT VISIT · ${p.name.toUpperCase()}',
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTheme.label().copyWith(color: AppColors.sand.withOpacity(0.7))),
+                    ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                       decoration: BoxDecoration(
@@ -267,8 +385,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         borderRadius: BorderRadius.circular(30),
                       ),
                       child: Text(when,
-                          style: AppTheme.body(11.5,
-                              color: AppColors.maroon, weight: FontWeight.w800)),
+                          style: AppTheme.body(11.5, color: AppColors.maroon, weight: FontWeight.w800)),
                     ),
                   ],
                 ),
@@ -295,7 +412,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ]),
                 const SizedBox(height: 18),
                 GestureDetector(
-                  onTap: () => widget.onNavigate(1),
+                  onTap: () => widget.onNavigate(2),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                     decoration: BoxDecoration(
@@ -316,7 +433,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-          // Dhaka ribbon edge
           const Positioned(right: 0, top: 0, bottom: 0, width: 18, child: Ribbon()),
         ],
       ),
@@ -324,20 +440,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ───────── stats ─────────
-  Widget _stats(int upcomingCount) {
-    Widget stat(IconData icon, String value, String label) => Expanded(
-          child: GlassCard(
-            radius: 28,
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-            child: Column(
-              children: [
-                Icon(icon, color: AppColors.brown, size: 22),
-                const SizedBox(height: 6),
-                Text(value, style: AppTheme.heading(24)),
-                Text(label,
-                    textAlign: TextAlign.center,
-                    style: AppTheme.body(11.5, color: AppColors.tan)),
-              ],
+  Widget _stats(Person p, int upcomingCount, int doses) {
+    final docs = mockDocuments.where((d) => d.personId == p.id).length;
+    final scans = mockScans.where((s) => s.personId == p.id).length;
+
+    Widget stat(IconData icon, String value, String label, {bool dark = false}) => Expanded(
+          child: GestureDetector(
+            onTap: dark || label.startsWith('Docs')
+                ? () => _open(p, RecordSection.documents)
+                : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+              decoration: BoxDecoration(
+                color: dark ? AppColors.scanDark : Colors.white.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                    color: dark ? AppColors.scanAccent.withOpacity(0.3) : Colors.white.withOpacity(0.7)),
+              ),
+              child: Column(
+                children: [
+                  Icon(icon, color: dark ? AppColors.scanAccent : AppColors.brown, size: 22),
+                  const SizedBox(height: 6),
+                  Text(value, style: AppTheme.heading(24, color: dark ? Colors.white : AppColors.maroon)),
+                  Text(label,
+                      textAlign: TextAlign.center,
+                      style: AppTheme.body(11.5, color: dark ? AppColors.scanAccent : AppColors.tan)),
+                ],
+              ),
             ),
           ),
         );
@@ -345,18 +474,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Row(
       children: [
         stat(Icons.event_available_rounded, '$upcomingCount', 'Upcoming\nvisits'),
-        const SizedBox(width: 12),
-        stat(Icons.medication_rounded, '${mockMedications.length}', 'Doses\ntoday'),
-        const SizedBox(width: 12),
-        stat(Icons.folder_rounded, '${mockRecords.length}', 'Records\nstored'),
+        const SizedBox(width: 10),
+        stat(Icons.description_rounded, '$docs', 'Docs\nstored'),
+        const SizedBox(width: 10),
+        stat(Icons.biotech_rounded, '$scans', 'X-rays &\nscans', dark: true),
       ],
     );
   }
 
   // ───────── medications ─────────
-  Widget _medications() {
-    final done = _taken.length;
-    final total = mockMedications.length;
+  Widget _medications(Person p, List<Medication> meds) {
+    if (meds.isEmpty) {
+      return GlassCard(
+        radius: 36,
+        child: Text('No medication added for ${p.name} yet.',
+            style: AppTheme.body(14, color: AppColors.muted)),
+      );
+    }
+    final done = List.generate(meds.length, (i) => i).where((i) => _taken.contains('${p.id}-$i')).length;
+    final total = meds.length;
     return GlassCard(
       radius: 36,
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
@@ -381,12 +517,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          ...List.generate(mockMedications.length, (i) {
-            final m = mockMedications[i];
-            final taken = _taken.contains(i);
+          ...List.generate(meds.length, (i) {
+            final m = meds[i];
+            final key = '${p.id}-$i';
+            final taken = _taken.contains(key);
             return InkWell(
               borderRadius: BorderRadius.circular(20),
-              onTap: () => setState(() => taken ? _taken.remove(i) : _taken.add(i)),
+              onTap: () => setState(() => taken ? _taken.remove(key) : _taken.add(key)),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 child: Row(
@@ -431,7 +568,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ───────── quick actions ─────────
-  Widget _quickActions() {
+  Widget _quickActions(Person p) {
     Widget action(IconData icon, String label, VoidCallback onTap) => Expanded(
           child: GestureDetector(
             onTap: onTap,
@@ -467,21 +604,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
       child: Row(
         children: [
-          action(Icons.add_task_rounded, 'Book\nvisit', () => widget.onNavigate(1)),
-          action(Icons.note_add_rounded, 'Add\nrecord', () => widget.onNavigate(2)),
-          action(Icons.person_add_alt_1_rounded, 'Add\npatient', () => _soon('Add patient')),
-          action(Icons.group_add_rounded, 'Invite\nfamily', () => _soon('Invite family')),
+          action(Icons.add_task_rounded, 'Add\nvisit', () => _open(p, RecordSection.visits)),
+          action(Icons.add_a_photo_rounded, 'Add\ndocument', () => _open(p, RecordSection.documents)),
+          action(Icons.person_add_alt_1_rounded, 'Add\nperson',
+              () => showAddPersonSheet(context, () => setState(() {}))),
+          action(Icons.lock_person_rounded, 'Share\naccess', () => _open(p, RecordSection.access)),
         ],
       ),
     );
   }
 
   // ───────── records ─────────
-  Widget _recordTile(MedicalRecord r) {
+  Widget _recordTile(Person p, MedicalRecord r) {
     return GlassCard(
       radius: 30,
       padding: const EdgeInsets.all(16),
-      onTap: () => widget.onNavigate(2),
+      onTap: () => _open(p, RecordSection.history),
       child: Row(
         children: [
           Container(

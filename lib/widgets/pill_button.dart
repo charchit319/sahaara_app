@@ -7,6 +7,7 @@ class PillButton extends StatelessWidget {
   final VoidCallback onPressed;
   final bool outlined;
   final IconData? icon;
+  final Color? color;
 
   const PillButton({
     super.key,
@@ -14,6 +15,7 @@ class PillButton extends StatelessWidget {
     required this.onPressed,
     this.outlined = false,
     this.icon,
+    this.color,
   });
 
   @override
@@ -27,7 +29,10 @@ class PillButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(40),
           gradient: outlined
               ? null
-              : const LinearGradient(colors: [AppColors.maroon, AppColors.maroonDark]),
+              : LinearGradient(
+                  colors: color != null
+                      ? [color!, color!]
+                      : [AppColors.maroon, AppColors.maroonDark]),
           border: outlined ? Border.all(color: AppColors.maroon, width: 1.2) : null,
           boxShadow: outlined
               ? null
