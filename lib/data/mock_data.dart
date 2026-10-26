@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// In-memory stand-ins for the database. They start EMPTY, so the app shows
-/// empty states until data is added. Next step: replace each list with Supabase.
+/// In-memory copies of what is loaded from Supabase. They start EMPTY.
 
 // ───────── People (one record per person) ─────────
 class Person {
@@ -9,13 +8,15 @@ class Person {
   final String name;
   final String relation;
   final int? age;
-  const Person(this.id, this.name, this.relation, this.age);
+  final String? ownerId; // creator of the record, the only one who manages its access
+  const Person(this.id, this.name, this.relation, this.age, {this.ownerId});
 
   factory Person.fromRow(Map<String, dynamic> row) => Person(
         row['id'] as String,
         row['name'] as String,
         (row['relation'] as String?) ?? '',
         row['age'] as int?,
+        ownerId: row['created_by'] as String?,
       );
 
   /// "Father · 74 yrs" (skips whatever is missing)
@@ -33,7 +34,7 @@ String personName(String id) => mockPeople
 
 // ───────── Hospital visits ─────────
 class Appointment {
-  final String id; // uuid from the database
+  final String id;
   final String personId;
   final DateTime dateTime;
   final String doctor;
@@ -61,7 +62,7 @@ final List<Appointment> mockAppointments = [];
 
 // ───────── Medical history ─────────
 class MedicalRecord {
-  final String id; // uuid from the database
+  final String id;
   final String personId;
   final DateTime date;
   final String diagnosis;
@@ -85,7 +86,7 @@ class MedicalRecord {
 
 final List<MedicalRecord> mockRecords = [];
 
-// ───────── Medication ─────────
+// ───────── Medication (still local) ─────────
 class Medication {
   final String personId;
   final String name;
@@ -110,18 +111,57 @@ extension AccessLevelX on AccessLevel {
         AccessLevel.viewOnly => 'Can see everything, but cannot change anything',
         AccessLevel.limited => 'Can only see visits and medication',
       };
+  String get db => switch (this) {
+        AccessLevel.full => 'full',
+        AccessLevel.viewOnly => 'view',
+        AccessLevel.limited => 'limited',
+      };
 }
+
+AccessLevel accessLevelFromDb(String s) => switch (s) {
+      'full' => AccessLevel.full,
+      'view' => AccessLevel.viewOnly,
+      _ => AccessLevel.limited,
+    };
+
+/// 'self' -> 'Self'
+String roleFromDb(String r) => r.isEmpty ? r : r[0].toUpperCase() + r.substring(1);
+
+/// What we show to people: 'Self' reads better as 'Themselves'.
+String roleLabel(String r) => r == 'Self' ? 'Themselves' : r;
 
 class AccessMember {
   final String name;
   final String role; // Self, Caregiver, Family, Doctor
   final AccessLevel level;
-  final bool isOwner;
-  const AccessMember(this.name, this.role, this.level, {this.isOwner = false});
+  final bool isOwner; // the creator of the record
+  final String? userId;
+  const AccessMember(this.name, this.role, this.level, {this.isOwner = false, this.userId});
 }
 
 /// personId -> people who can open that person's record.
 final Map<String, List<AccessMember>> mockAccess = {};
+
+class Invite {
+  final String id;
+  final String personId;
+  final String email;
+  final String role;
+  final AccessLevel level;
+  const Invite(this.id, this.personId, this.email, this.role, this.level);
+
+  factory Invite.fromRow(Map<String, dynamic> r) => Invite(
+        r['id'] as String,
+        r['person_id'] as String,
+        r['email'] as String,
+        roleFromDb(r['role'] as String),
+        accessLevelFromDb(r['level'] as String),
+      );
+}
+
+/// personId -> pending invites (only the creator can see these).
+final Map<String, List<Invite>> mockInvites = {};
+
 // ───────── Documents (paper) ─────────
 enum DocKind { prescription, labReport, insurance, idCard, other }
 
@@ -140,15 +180,35 @@ extension DocKindX on DocKind {
         DocKind.idCard => Icons.badge_rounded,
         DocKind.other => Icons.description_rounded,
       };
+  String get db => switch (this) {
+        DocKind.prescription => 'prescription',
+        DocKind.labReport => 'lab_report',
+        DocKind.insurance => 'insurance',
+        DocKind.idCard => 'id_card',
+        DocKind.other => 'other',
+      };
 }
 
+DocKind docKindFromDb(String s) =>
+    DocKind.values.firstWhere((k) => k.db == s, orElse: () => DocKind.other);
+
 class DocumentItem {
-  final int id;
+  final String id;
   final String personId;
   final String title;
   final DateTime date;
   final DocKind kind;
-  const DocumentItem(this.id, this.personId, this.title, this.date, this.kind);
+  final String? filePath; // path inside the private storage bucket
+  const DocumentItem(this.id, this.personId, this.title, this.date, this.kind, {this.filePath});
+
+  factory DocumentItem.fromRow(Map<String, dynamic> r) => DocumentItem(
+        r['id'] as String,
+        r['person_id'] as String,
+        r['title'] as String,
+        DateTime.parse(r['added_on'] as String),
+        docKindFromDb(r['kind'] as String),
+        filePath: r['file_path'] as String?,
+      );
 }
 
 // ───────── X-rays & scans (imaging), kept separate from documents ─────────
@@ -167,18 +227,35 @@ extension ScanKindX on ScanKind {
         ScanKind.ct => Icons.donut_large_rounded,
         ScanKind.ultrasound => Icons.graphic_eq_rounded,
       };
+  String get db => name; // xray, mri, ct, ultrasound
 }
 
+ScanKind scanKindFromDb(String s) =>
+    ScanKind.values.firstWhere((k) => k.db == s, orElse: () => ScanKind.xray);
+
 class ScanItem {
-  final int id;
+  final String id;
   final String personId;
   final String title;
   final String bodyPart;
   final ScanKind kind;
   final DateTime date;
   final String facility;
+  final String? filePath;
   const ScanItem(this.id, this.personId, this.title, this.bodyPart, this.kind, this.date,
-      this.facility);
+      this.facility,
+      {this.filePath});
+
+  factory ScanItem.fromRow(Map<String, dynamic> r) => ScanItem(
+        r['id'] as String,
+        r['person_id'] as String,
+        r['title'] as String,
+        (r['body_part'] as String?) ?? 'Not specified',
+        scanKindFromDb(r['modality'] as String),
+        DateTime.parse(r['scanned_on'] as String),
+        (r['facility'] as String?) ?? 'Not specified',
+        filePath: r['file_path'] as String?,
+      );
 }
 
 final List<DocumentItem> mockDocuments = [];

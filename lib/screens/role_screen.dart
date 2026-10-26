@@ -8,6 +8,7 @@ import 'senior_shell.dart';
 import '../config.dart'; 
 import 'login_screen.dart';
 import '../data/people_store.dart';
+import '../data/files_store.dart';
 
 /// Prototype stand-in for "which kind of account is this?".
 /// Later this comes from the user's profile after login.
@@ -102,6 +103,7 @@ Center(
   child: TextButton(
     onPressed: () async {
       peopleStore.clear();
+      filesStore.clear();
       await supabase.auth.signOut();
       if (!context.mounted) return;
       Navigator.of(context).pushAndRemoveUntil(

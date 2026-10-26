@@ -7,6 +7,7 @@ import 'dashboard_screen.dart';
 import 'people_screen.dart';
 import '../data/people_store.dart';
 import '../data/care_store.dart';
+import '../data/files_store.dart';
 
 /// Caregiver app: Home · People · Visits · Contact
 class CaregiverShell extends StatefulWidget {
@@ -26,14 +27,14 @@ class _CaregiverShellState extends State<CaregiverShell> {
     NavItem(Icons.support_agent_outlined, Icons.support_agent_rounded, 'Contact'),
   ];
 
-  @override
+    @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => peopleStore.load());
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-      peopleStore.load();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await peopleStore.load(); // also attaches any invites sent to my email
       visitsStore.load();
       recordsStore.load();
+      filesStore.load();
     });
   }
 

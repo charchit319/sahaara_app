@@ -11,6 +11,8 @@ import '../widgets/page_header.dart';
 import '../widgets/pill_button.dart';
 import 'person_record_screen.dart';
 import '../data/care_store.dart';
+import '../data/files_store.dart';
+
 /// Opens the "add person" form. [onAdded] (optional) runs after saving.
 Future<void> showAddPersonSheet(BuildContext context, [VoidCallback? onAdded]) {
   return showAppSheet<void>(
@@ -119,7 +121,7 @@ class _PeopleScreenState extends State<PeopleScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([peopleStore, visitsStore]),
+            listenable: Listenable.merge([peopleStore, visitsStore, filesStore]),
             builder: (context, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

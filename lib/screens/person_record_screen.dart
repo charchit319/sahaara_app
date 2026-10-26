@@ -11,6 +11,8 @@ import 'medical_history_screen.dart';
 import 'add_record_sheet.dart';
 import 'add_visit_sheet.dart';
 import '../data/care_store.dart';
+import '../data/files_store.dart';
+import '../data/permissions.dart';
 
 enum RecordSection { overview, history, visits, documents, access }
 
@@ -52,17 +54,28 @@ class _PersonRecordScreenState extends State<PersonRecordScreen> {
 
   Person get p => widget.person;
 
+    bool get _canEdit => !widget.readOnly && canEditPerson(p);
+    bool get _canSeeAll => canSeeAll(p);
+
+  /// "Limited" access cannot see medical history, documents or scans.
+  List<RecordSection> get _sections => RecordSection.values
+      .where((s) => _canSeeAll || (s != RecordSection.history && s != RecordSection.documents))
+      .toList();
+
     @override
   void initState() {
     super.initState();
     visitsStore.addListener(_refresh);
     recordsStore.addListener(_refresh);
+    filesStore.addListener(_refresh);     // in initState
   }
 
   @override
   void dispose() {
     visitsStore.removeListener(_refresh);
     recordsStore.removeListener(_refresh);
+        filesStore.removeListener(_refresh);
+
     super.dispose();
   }
 
@@ -144,10 +157,10 @@ class _PersonRecordScreenState extends State<PersonRecordScreen> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        itemCount: RecordSection.values.length,
+        itemCount: _sections.length,
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (_, i) {
-          final s = RecordSection.values[i];
+          final s = _sections[i];
           final selected = s == _section;
           final (label, icon) = _meta[s]!;
           return GestureDetector(
@@ -191,33 +204,33 @@ class _PersonRecordScreenState extends State<PersonRecordScreen> {
         return _overview();
       case RecordSection.history:
         return Column(children: [
-if (!widget.readOnly)
+if (_canEdit)
   _addBar('ADD MEDICAL RECORD',
       () => showAddRecordSheet(context, p.id, () => setState(() {}))),          
 Expanded(
   child: MedicalHistoryScreen(
     personId: p.id,
     showHeader: false,
-    canEdit: !widget.readOnly,
+    canEdit: _canEdit,
     onChanged: () => setState(() {}),
   ),
 ),        ]);
       case RecordSection.visits:
         return Column(children: [
-if (!widget.readOnly)
+if (_canEdit)
   _addBar('ADD HOSPITAL VISIT',
       () => showAddVisitSheet(context, p.id, () => setState(() {}))),          
 Expanded(
   child: AppointmentsScreen(
     personId: p.id,
     showHeader: false,
-    canEdit: !widget.readOnly,
+    canEdit: _canEdit,
   ),
 ),        ]);
       case RecordSection.documents:
-        return DocumentsSection(personId: p.id, readOnly: widget.readOnly);
+        return DocumentsSection(personId: p.id, readOnly: !_canEdit);
       case RecordSection.access:
-        return AccessSection(person: p, readOnly: widget.readOnly);
+        return AccessSection(person: p);
     }
   }
 
@@ -235,7 +248,7 @@ Expanded(
       
       padding: const EdgeInsets.fromLTRB(24, 4, 24, 120),
       children: [
-                if (!widget.readOnly && history + visits + docs + scans == 0) ...[
+                if (_canEdit && history + visits + docs + scans == 0) ...[
           _getStarted(),
           const SizedBox(height: 16),
         ],
@@ -342,6 +355,9 @@ Expanded(
 
   Widget _tile(IconData icon, String value, String label, RecordSection target,
       {bool dark = false, bool wide = false}) {
+     if (!_canSeeAll && (target == RecordSection.history || target == RecordSection.documents)) {
+      return const SizedBox.shrink();
+    }
     final fg = dark ? Colors.white : AppColors.maroon;
     final sub = dark ? AppColors.scanAccent : AppColors.tan;
     final inner = Row(

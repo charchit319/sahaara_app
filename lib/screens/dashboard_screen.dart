@@ -10,6 +10,7 @@ import '../config.dart';
 import '../widgets/empty_state.dart';
 import '../data/people_store.dart';
 import '../data/care_store.dart';
+import '../data/files_store.dart';
 
 /// Caregiver home. Everything below the patient list follows the selected person.
 /// [onNavigate] switches the bottom-bar tab (0 Home, 1 People, 2 Visits, 3 Contact).
@@ -30,6 +31,7 @@ final Set<String> _taken = {}; // "personId-index"
     peopleStore.addListener(_refresh);
     visitsStore.addListener(_refresh);
     recordsStore.addListener(_refresh);
+    filesStore.addListener(_refresh);
   }
 
   @override
@@ -37,6 +39,7 @@ final Set<String> _taken = {}; // "personId-index"
     peopleStore.removeListener(_refresh);
     visitsStore.removeListener(_refresh);
     recordsStore.removeListener(_refresh);
+    filesStore.removeListener(_refresh);
     super.dispose();
   }
 
