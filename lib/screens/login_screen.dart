@@ -168,16 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             icon: Icons.lock_outline_rounded,
                             controller: _password,
                             isPassword: true),
-                        if (!_signUp)
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: _forgot,
-                              child: Text('Forgot password?',
-                                  style: AppTheme.body(13, color: AppColors.brown)),
-                            ),
-                          )
-                        else
+                        
                           const SizedBox(height: 10),
                         if (_message != null) ...[
                           Text(_message!,
